@@ -1,0 +1,17 @@
+﻿# 用户配置
+*.vbproj.user
+
+# 编译输出
+bin/
+obj/
+Debug/
+Release/
+
+# VS 缓存
+.vs/
+*.suo
+*.user
+
+# 系统文件
+Thumbs.db
+Desktop.ini

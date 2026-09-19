@@ -1,0 +1,23 @@
+root = true
+
+[*.vb]
+# 代码风格规则配置
+
+# 明确误报的规则设为 none（静默）：
+# IDE0058: 副作用方法调用（Process.Start/MessageBox.Show 等）的返回值被忽略，属正常写法
+# IDE0004: CInt/CLng/DirectCast 等数值类型转换，分析器无法正确处理重载决议与收缩转换
+# IDE0071: 带格式参数的 ToString("...") 被误判为可简化插值
+dotnet_diagnostic.IDE0058.severity = none
+dotnet_diagnostic.IDE0004.severity = none
+dotnet_diagnostic.IDE0071.severity = none
+
+# 真正有价值的代码风格规则，保持 warning 以便在构建时发现
+dotnet_diagnostic.IDE0017.severity = warning   # 对象初始化可简化
+dotnet_diagnostic.IDE0028.severity = warning   # 集合初始化可简化
+dotnet_diagnostic.IDE0031.severity = warning   # Null 检查可简化
+dotnet_diagnostic.IDE0044.severity = warning   # 字段可设为只读
+dotnet_diagnostic.IDE0045.severity = warning   # if 语句可简化
+dotnet_diagnostic.IDE0046.severity = warning   # if 语句可转换为三元
+dotnet_diagnostic.IDE0047.severity = warning   # 括号冗余
+dotnet_diagnostic.IDE0048.severity = warning   # 应添加括号
+dotnet_diagnostic.IDE0140.severity = warning   # 对象创建可简化
