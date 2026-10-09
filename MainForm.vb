@@ -9,6 +9,7 @@ Imports System.Text
 Imports System.Text.RegularExpressions
 Imports System.Threading
 Imports QRCoder
+Imports RelayCore
 Public Class MainForm
 
     ' --- 成员变量 ---
@@ -16,6 +17,13 @@ Public Class MainForm
     Private isRunning As Boolean = False
     Private listenThread As Threading.Thread
     Private Const DefaultPort As Integer = 8080
+
+    ' --- GameHub 公网中转 ---
+    ' 中转核心跑在本进程内，手机端通过同一条 ngrok 隧道（WebSocket 升级）接入，
+    ' 因此「外网开启时段」内即可用公网模式对战。
+    Private Const RelayPort As Integer = 45455      ' 中转核心端口（仅本机回环使用）
+    Private _relayHost As RelayCore.RelayHost
+    Private _relayConn As Integer = 0               ' 当前公网中转连接数（用于空闲保护）
     'Private SharedFolderPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
 
     ' 共享文件夹路径：程序运行目录下的 "Shared" 文件夹
@@ -1908,6 +1916,7 @@ Public Class MainForm
             listenThread.Start()
             AddLog($"服务手动启动，监听端口 {port}，共享文件夹: {SharedFolderPath}")
             GenerateQrCode(ip, port)
+            EnsureRelayCore()
 
             ' 启动空闲检测
             lastActivityTime = DateTime.Now
@@ -3003,6 +3012,13 @@ Public Class MainForm
 
         Dim req As HttpListenerRequest = context.Request
         Dim res As HttpListenerResponse = context.Response
+
+        ' GameHub 公网中转：WebSocket 升级请求交给中转核心处理
+        ' （与网页/文件接口共用同一端口和同一条 ngrok 隧道，手机端地址无需变化）
+        If String.Equals(req.Headers("Upgrade"), "websocket", StringComparison.OrdinalIgnoreCase) Then
+            HandleRelayWebSocket(context)
+            Return
+        End If
 
         Try
             Dim path As String = req.Url.AbsolutePath
@@ -5643,6 +5659,7 @@ Public Class MainForm
 
             AddLog($"文件服务已启动（端口 {port}），共享文件夹: {SharedFolderPath}")
             GenerateQrCode(ip, port)
+            EnsureRelayCore()
 
             ' 初始化空闲检测定时器
             lastActivityTime = DateTime.Now
@@ -5671,6 +5688,12 @@ Public Class MainForm
     Private Sub CheckInactivity(sender As Object, e As Timers.ElapsedEventArgs)
         If Not isRunning Then
             inactivityTimer?.Stop()
+            Return
+        End If
+
+        ' 有手机正在通过公网中转对战：视为活跃，避免对局中途被自动停服务
+        If Threading.Interlocked.CompareExchange(_relayConn, 0, 0) > 0 Then
+            lastActivityTime = DateTime.Now
             Return
         End If
 
@@ -5723,6 +5746,7 @@ Public Class MainForm
 
         isRunning = False
         isServiceRunning = False
+        StopRelayCore()
         UpdateUIState(False)
 
         ' 清空局域网二维码（外网二维码若 ngrok 仍在时间段内运行则保留）
@@ -5743,6 +5767,73 @@ Public Class MainForm
         SaveLogToFile()
         txtLog.Clear()
         AddLog("服务已停止，日志已保存并清空")
+    End Sub
+
+    ' ================== GameHub 公网中转 ==================
+
+    ''' <summary>
+    ''' 确保公网中转核心已在本进程内运行（服务启动时调用，重复调用无副作用）。
+    ''' </summary>
+    Private Sub EnsureRelayCore()
+        If _relayHost IsNot Nothing AndAlso _relayHost.IsRunning Then Return
+
+        Try
+            RelayCore.RelayLog.Sink = Sub(msg) AddLog("[中转] " & msg)
+            RelayCore.RelayLog.EchoToConsole = False
+
+            _relayHost = New RelayCore.RelayHost()
+            If _relayHost.Start(RelayPort) Then
+                AddLog($"公网中转已就绪（本机 TCP {RelayPort}）· 外网时段内手机填公网地址即可建房/加入")
+            Else
+                AddLog("公网中转启动失败：端口可能被占用")
+            End If
+        Catch ex As Exception
+            AddLog("公网中转启动异常：" & ex.Message)
+        End Try
+    End Sub
+
+    ''' <summary>停止公网中转核心并释放端口。</summary>
+    Private Sub StopRelayCore()
+        Try
+            If _relayHost IsNot Nothing Then
+                _relayHost.Stop()
+                _relayHost.Dispose()
+                _relayHost = Nothing
+            End If
+        Catch ex As Exception
+            AddLog("停止公网中转异常：" & ex.Message)
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' 处理 GameHub 手机端的中转 WebSocket：把 WS 连接桥接到本机中转核心。
+    ''' 与网页请求共用同一端口，靠 Upgrade 头区分，因此公网地址与「私有云盘」完全一致。
+    ''' </summary>
+    Private Sub HandleRelayWebSocket(context As HttpListenerContext)
+        EnsureRelayCore()
+
+        Dim host As RelayCore.RelayHost = _relayHost
+        If host Is Nothing Then
+            Try
+                context.Response.StatusCode = 503
+                context.Response.Close()
+            Catch
+                ' ignore
+            End Try
+            Return
+        End If
+
+        Interlocked.Increment(_relayConn)
+        Try
+            Dim wsContext = context.AcceptWebSocketAsync(Nothing).GetAwaiter().GetResult()
+            AddLog("公网中转：手机已连入")
+            host.HandleWebSocketAsync(wsContext.WebSocket, CancellationToken.None).GetAwaiter().GetResult()
+            AddLog("公网中转：连接已断开")
+        Catch ex As Exception
+            AddLog("公网中转连接异常：" & ex.Message)
+        Finally
+            Interlocked.Decrement(_relayConn)
+        End Try
     End Sub
 
 

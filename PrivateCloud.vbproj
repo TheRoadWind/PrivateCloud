@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -18,7 +18,7 @@
     <Product>私有云盘</Product>
     <AssemblyTitle>私有云盘</AssemblyTitle>
     <Company></Company>
-    <Version>2.0.0</Version>
+    <Version>3.2.3.14</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -48,6 +48,11 @@
   <ItemGroup>
     <PackageReference Include="QRCoder" Version="1.8.0" />
     <PackageReference Include="SharpCompress" Version="0.38.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- GameHub 公网中转核心（房间配对 + WebSocket 桥接），随本项目一起编译、单文件发布 -->
+    <ProjectReference Include="RelayCore\RelayCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>
