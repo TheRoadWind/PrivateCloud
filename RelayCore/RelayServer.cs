@@ -114,6 +114,19 @@ public sealed class RelayServer
 
             var want = ParseRoom(firstLine).Trim();
 
+            // 自动匹配：加入方没填房间号时，找一间「房主在等、还没人加入」的房间；
+            // 找不到就自己建房等对方（于是两边各点一次就能配上，不必互相报房间号）。
+            if (ParseAuto(firstLine) && want.Length == 0)
+            {
+                lock (_sync)
+                {
+                    want = FindWaitingRoomLocked() ?? "";
+                }
+
+                RelayLog.Write(want.Length > 0 ? $"自动匹配到等待中的房间 {want}" : "没有等待中的房间，转为建房等待");
+            }
+
+
             Room? room;
             string role;
             var reject = false;
@@ -267,6 +280,8 @@ public sealed class RelayServer
                 }
                 else
                 {
+                    // 告知还在线的一方：对方掉线了（房间仍保留，方便对方重连回来）
+                    await SendAsync(peer, "{\"t\":\"peer-offline\"}").ConfigureAwait(false);
                     RelayLog.Write($"房间 {room.Code}：{role} 已断开，对端保留 {_graceSeconds} 秒等待重连");
                 }
 
@@ -355,6 +370,20 @@ public sealed class RelayServer
         }
     }
 
+    private string? FindWaitingRoomLocked()
+    {
+        foreach (var pair in _rooms)
+        {
+            var room = pair.Value;
+            if (room.Host is not null && room.Guest is null)
+            {
+                return pair.Key;
+            }
+        }
+
+        return null;
+    }
+
     private string NewCodeLocked()
     {
         string code;
@@ -441,6 +470,30 @@ public sealed class RelayServer
         }
 
         return "";
+    }
+
+    /// <summary>握手行里是否带 auto 标记（自动匹配等待中的房间）。</summary>
+    private static bool ParseAuto(string line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            if (!doc.RootElement.TryGetProperty("auto", out var value))
+            {
+                return false;
+            }
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.String => string.Equals(value.GetString(), "true", StringComparison.OrdinalIgnoreCase),
+                _ => false,
+            };
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static async Task<bool> SendAsync(TcpClient client, string json)
